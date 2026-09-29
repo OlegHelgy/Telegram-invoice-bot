@@ -1,5 +1,4 @@
 import base64
-import os
 
 from openai import OpenAI
 
@@ -7,8 +6,6 @@ from config import OPENAI_API_KEY
 
 
 client = OpenAI(api_key=OPENAI_API_KEY)
-
-print("OpenAI client created successfully")
 
 
 def ask_gpt_with_invoice(
@@ -38,9 +35,9 @@ def ask_gpt_with_invoice(
                         "type": "input_text",
                         "text": (
                             f"{prompt}\n\n"
-                            "=== TEXT EXTRACTED BY PYPDF ===\n"
+                            "=== ТЕКСТ, ВИТЯГНУТИЙ PYPDF ===\n"
                             f"{extracted_text}\n\n"
-                            "=== LOCAL PARSER RESULT ===\n"
+                            "=== РЕЗУЛЬТАТ ЛОКАЛЬНОГО PARSER ===\n"
                             f"{parser_result}\n"
                         ),
                     },

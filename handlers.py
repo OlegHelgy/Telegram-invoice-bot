@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 from datetime import datetime
@@ -1056,8 +1057,13 @@ async def invoice_document_handler(message: Message):
         exist_ok=True
     )
 
+    # Унікальне ім'я файлу для кожного користувача та документа,
+    # щоб паралельні завантаження не перезаписували одне одного.
+    user_id = message.from_user.id
+
     file_path = (
-        "downloads/invoice.pdf"
+        f"downloads/invoice_{user_id}_"
+        f"{document.file_unique_id}.pdf"
     )
 
     try:
@@ -1072,7 +1078,7 @@ async def invoice_document_handler(message: Message):
         )
 
         print(
-            f"Invoice PDF saved to {file_path}"
+            f"PDF інвойсу збережено: {file_path}"
         )
 
         await message.answer(
@@ -1084,26 +1090,26 @@ async def invoice_document_handler(message: Message):
         # 2. pypdf
         # ----------------------------------------------------
 
-        extracted_text = (
-            extract_pdf_text(
-                file_path
-            )
+        extracted_text = await asyncio.to_thread(
+            extract_pdf_text,
+            file_path,
         )
 
         print(
-            "PDF text extracted"
+            "Текст з PDF витягнуто"
         )
 
         # ----------------------------------------------------
-        # 3. Local parser
+        # 3. Локальний parser
         # ----------------------------------------------------
 
-        local_result = parse_invoice(
-            file_path
+        local_result = await asyncio.to_thread(
+            parse_invoice,
+            file_path,
         )
 
         print(
-            "Local parser result:"
+            "Результат локального parser:"
         )
 
         print(
@@ -1112,16 +1118,20 @@ async def invoice_document_handler(message: Message):
 
         # ----------------------------------------------------
         # 4. GPT
+        #
+        # Виносимо синхронний виклик OpenAI в окремий потік,
+        # щоб не блокувати event loop бота.
         # ----------------------------------------------------
 
-        ai_result = analyze_invoice(
-            pdf_path=file_path,
-            extracted_text=extracted_text,
-            parser_result=local_result,
+        ai_result = await asyncio.to_thread(
+            analyze_invoice,
+            file_path,
+            extracted_text,
+            local_result,
         )
 
         print(
-            "GPT result:"
+            "Результат GPT:"
         )
 
         print(
@@ -1129,7 +1139,7 @@ async def invoice_document_handler(message: Message):
         )
 
         # ----------------------------------------------------
-        # 5. Reconciliation
+        # 5. Звірка результатів
         # ----------------------------------------------------
 
         reconciliation_result = (
@@ -1140,7 +1150,7 @@ async def invoice_document_handler(message: Message):
         )
 
         print(
-            "Reconciliation result:"
+            "Результат звірки:"
         )
 
         print(
@@ -1154,8 +1164,6 @@ async def invoice_document_handler(message: Message):
         conflicts = (
             reconciliation_result["conflicts"]
         )
-
-        user_id = message.from_user.id
 
         # ----------------------------------------------------
         # Зберігаємо дані ДО показу конфлікту
@@ -1223,7 +1231,7 @@ async def invoice_document_handler(message: Message):
     except Exception as e:
 
         print(
-            "Invoice processing error:"
+            "Помилка обробки інвойсу:"
         )
 
         print(
@@ -1235,6 +1243,20 @@ async def invoice_document_handler(message: Message):
             "Можливо, документ має погану якість "
             "або його неможливо коректно розпізнати."
         )
+
+    finally:
+
+        # Прибираємо тимчасовий PDF, щоб не засмічувати диск.
+        if os.path.exists(file_path):
+
+            try:
+                os.remove(file_path)
+
+            except OSError as cleanup_error:
+                print(
+                    "Не вдалося видалити тимчасовий файл:"
+                )
+                print(repr(cleanup_error))
 
 
 # ============================================================

@@ -23,19 +23,19 @@ def parse_invoice(file_path: str) -> dict:
         "Тип документа": "",
         "Номер документа": "",
         "Дата": "",
-        "Поставщик": "",
-        "Получатель": "",
-        "Платежная система": "",
-        "Описание": "",
-        "Количество": "",
-        "Цена": "",
-        "НДС": "",
-        "Итого": "",
+        "Постачальник": "",
+        "Отримувач": "",
+        "Платіжна система": "",
+        "Опис": "",
+        "Кількість": "",
+        "Ціна": "",
+        "ПДВ": "",
+        "Разом": "",
         "Валюта": "",
         "IBAN": "",
         "SWIFT": "",
         "Банк": "",
-        "Адрес банка": "",
+        "Адреса банку": "",
     }
 
     # ==========================================
@@ -53,7 +53,7 @@ def parse_invoice(file_path: str) -> dict:
     # ==========================================
 
     match = re.search(
-        r"(?:Invoice Number|Invoice No\.?|Number|No\.?)\s*[:#]?\s*([A-Z0-9-]+)",
+        r"(?:Invoice Number|Invoice No\.?|Number|No\.?)\s*[:#]?\s*([A-Za-z0-9-]+)",
         text,
         re.IGNORECASE,
     )
@@ -106,7 +106,7 @@ def parse_invoice(file_path: str) -> dict:
         result["Валюта"] = match.group(1).upper()
 
     # ==========================================
-    # Поставщик
+    # Постачальник
     # ==========================================
 
     match = re.search(
@@ -116,10 +116,10 @@ def parse_invoice(file_path: str) -> dict:
     )
 
     if match:
-        result["Поставщик"] = match.group(1).strip()
+        result["Постачальник"] = match.group(1).strip()
 
     # ==========================================
-    # Получатель / Customer
+    # Отримувач / Customer
     # ==========================================
 
     match = re.search(
@@ -129,10 +129,10 @@ def parse_invoice(file_path: str) -> dict:
     )
 
     if match:
-        result["Получатель"] = match.group(1).strip()
+        result["Отримувач"] = match.group(1).strip()
 
-    # Старый вариант
-    if not result["Получатель"]:
+    # Старий варіант
+    if not result["Отримувач"]:
         match = re.search(
             r"Your reference \(please mention on the transfer\)\s+(.+)",
             text,
@@ -140,16 +140,16 @@ def parse_invoice(file_path: str) -> dict:
         )
 
         if match:
-            result["Получатель"] = match.group(1).strip()
+            result["Отримувач"] = match.group(1).strip()
 
     # ==========================================
-    # Платежная система / Payment Provider
+    # Платіжна система / Payment Provider
     # ==========================================
     #
-    # Важно:
-    # это НЕ supplier и НЕ customer.
+    # Важливо:
+    # це НЕ supplier і НЕ customer.
     #
-    # Ищем только явно обозначенную роль.
+    # Шукаємо тільки явно позначену роль.
     #
 
     payment_provider_patterns = [
@@ -167,17 +167,17 @@ def parse_invoice(file_path: str) -> dict:
         )
 
         if match:
-            result["Платежная система"] = match.group(1).strip()
+            result["Платіжна система"] = match.group(1).strip()
             break
 
-    # Если в документе используется Beneficiary,
-    # не записываем его автоматически в платежную систему.
+    # Якщо в документі використовується Beneficiary,
+    # не записуємо його автоматично в платіжну систему.
     #
-    # Это намеренно:
-    # GPT должен определить роль по контексту PDF.
+    # Це навмисно:
+    # GPT повинен визначити роль за контекстом PDF.
 
     # ==========================================
-    # Описание
+    # Опис
     # ==========================================
 
     match = re.search(
@@ -187,9 +187,9 @@ def parse_invoice(file_path: str) -> dict:
     )
 
     if match:
-        result["Описание"] = match.group(1).strip()
+        result["Опис"] = match.group(1).strip()
 
-    if not result["Описание"]:
+    if not result["Опис"]:
         match = re.search(
             r"Description\s*:?\s*(.+)",
             text,
@@ -197,10 +197,10 @@ def parse_invoice(file_path: str) -> dict:
         )
 
         if match:
-            result["Описание"] = match.group(1).strip()
+            result["Опис"] = match.group(1).strip()
 
     # ==========================================
-    # Количество
+    # Кількість
     # ==========================================
 
     match = re.search(
@@ -210,9 +210,9 @@ def parse_invoice(file_path: str) -> dict:
     )
 
     if match:
-        result["Количество"] = match.group(1)
+        result["Кількість"] = match.group(1)
 
-    if not result["Количество"]:
+    if not result["Кількість"]:
         match = re.search(
             r"Qty\.?\s*:?\s*([\d.,]+)",
             text,
@@ -220,10 +220,10 @@ def parse_invoice(file_path: str) -> dict:
         )
 
         if match:
-            result["Количество"] = match.group(1)
+            result["Кількість"] = match.group(1)
 
     # ==========================================
-    # Цена
+    # Ціна
     # ==========================================
 
     match = re.search(
@@ -233,9 +233,9 @@ def parse_invoice(file_path: str) -> dict:
     )
 
     if match:
-        result["Цена"] = match.group(1)
+        result["Ціна"] = match.group(1)
 
-    if not result["Цена"]:
+    if not result["Ціна"]:
         match = re.search(
             r"Unit price\s*:?\s*([\d'.,]+)",
             text,
@@ -243,10 +243,10 @@ def parse_invoice(file_path: str) -> dict:
         )
 
         if match:
-            result["Цена"] = match.group(1)
+            result["Ціна"] = match.group(1)
 
     # ==========================================
-    # НДС
+    # ПДВ
     # ==========================================
 
     match = re.search(
@@ -256,9 +256,9 @@ def parse_invoice(file_path: str) -> dict:
     )
 
     if match:
-        result["НДС"] = match.group(1)
+        result["ПДВ"] = match.group(1)
 
-    if not result["НДС"]:
+    if not result["ПДВ"]:
         match = re.search(
             r"VAT\s*:?\s*([\d.,]+)",
             text,
@@ -266,10 +266,10 @@ def parse_invoice(file_path: str) -> dict:
         )
 
         if match:
-            result["НДС"] = match.group(1)
+            result["ПДВ"] = match.group(1)
 
     # ==========================================
-    # Итого
+    # Разом
     # ==========================================
 
     match = re.search(
@@ -279,7 +279,7 @@ def parse_invoice(file_path: str) -> dict:
     )
 
     if match:
-        result["Итого"] = match.group(2)
+        result["Разом"] = match.group(2)
         result["Валюта"] = match.group(1).upper()
 
     # ==========================================
@@ -322,7 +322,7 @@ def parse_invoice(file_path: str) -> dict:
         result["Банк"] = match.group(1).strip()
 
     # ==========================================
-    # Адрес банка
+    # Адреса банку
     # ==========================================
 
     place_match = re.search(
@@ -349,6 +349,6 @@ def parse_invoice(file_path: str) -> dict:
             f"{postal_match.group(1)} - {postal_match.group(2).strip()}"
         )
 
-    result["Адрес банка"] = ", ".join(address_parts)
+    result["Адреса банку"] = ", ".join(address_parts)
 
     return result

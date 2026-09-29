@@ -1,6 +1,17 @@
 import json
+import re
 
 from openai_client import ask_gpt_with_invoice
+
+
+def _strip_code_fences(text: str) -> str:
+    text = text.strip()
+
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text)
+
+    return text.strip()
 
 
 def build_invoice_prompt(
@@ -169,4 +180,13 @@ def analyze_invoice(
         prompt=prompt,
     )
 
-    return json.loads(response)
+    cleaned = _strip_code_fences(response)
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        print("Не вдалося розпарсити відповідь GPT як JSON:")
+        print(repr(response))
+        raise ValueError(
+            "GPT повернув відповідь у некоректному форматі."
+        ) from e
