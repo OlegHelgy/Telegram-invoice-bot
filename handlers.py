@@ -1,3 +1,4 @@
+import logging
 import os
 
 from aiogram import F, Router
@@ -13,6 +14,7 @@ from keyboards.main_menu import main_menu
 
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -176,8 +178,6 @@ async def invoice_button_handler(message: Message):
 
 @router.message(F.document)
 async def invoice_document_handler(message: Message):
-    print("DOCUMENT HANDLER WORKS")
-
     document = message.document
 
     file_name = document.file_name or ""
@@ -193,7 +193,6 @@ async def invoice_document_handler(message: Message):
     file_path = "downloads/invoice.pdf"
 
     try:
-
         # ----------------------------------------------------
         # 1. Зберігаємо PDF
         # ----------------------------------------------------
@@ -203,8 +202,9 @@ async def invoice_document_handler(message: Message):
             destination=file_path
         )
 
-        print(
-            f"Invoice PDF saved to {file_path}"
+        logger.info(
+            "Invoice PDF saved for user %s.",
+            message.from_user.id,
         )
 
         await message.answer(
@@ -220,7 +220,10 @@ async def invoice_document_handler(message: Message):
             file_path
         )
 
-        print("PDF text extracted")
+        logger.info(
+            "PDF text extracted for user %s.",
+            message.from_user.id,
+        )
 
         # ----------------------------------------------------
         # 3. Локальний parser
@@ -230,8 +233,10 @@ async def invoice_document_handler(message: Message):
             file_path
         )
 
-        print("Local parser result:")
-        print(local_result)
+        logger.info(
+            "Local parser completed for user %s.",
+            message.from_user.id,
+        )
 
         # ----------------------------------------------------
         # 4. GPT
@@ -243,8 +248,10 @@ async def invoice_document_handler(message: Message):
             parser_result=local_result,
         )
 
-        print("GPT result:")
-        print(ai_result)
+        logger.info(
+            "GPT analysis completed for user %s.",
+            message.from_user.id,
+        )
 
         # ----------------------------------------------------
         # 5. Порівняння результатів
@@ -255,8 +262,10 @@ async def invoice_document_handler(message: Message):
             ai_result
         )
 
-        print("Reconciliation result:")
-        print(reconciliation_result)
+        logger.info(
+            "Reconciliation completed for user %s.",
+            message.from_user.id,
+        )
 
         final_data = reconciliation_result["data"]
 
@@ -267,13 +276,11 @@ async def invoice_document_handler(message: Message):
         # ----------------------------------------------------
 
         if conflicts:
-
             conflict_text = (
                 "⚠️ Виявлено розбіжності.\n\n"
             )
 
             for field, values in conflicts.items():
-
                 field_name = FIELD_NAMES.get(
                     field,
                     field
@@ -332,10 +339,11 @@ async def invoice_document_handler(message: Message):
             reply_markup=confirmation_keyboard()
         )
 
-    except Exception as e:
-
-        print("Invoice processing error:")
-        print(e)
+    except Exception:
+        logger.exception(
+            "Invoice processing failed for user %s.",
+            message.from_user.id,
+        )
 
         await message.answer(
             "❌ Не вдалося обробити інвойс.\n\n"
@@ -379,8 +387,9 @@ async def invoice_confirm_handler(
         "✅ Дані інвойсу підтверджено."
     )
 
-    print(
-        f"Invoice confirmed by user {user_id}"
+    logger.info(
+        "Invoice confirmed by user %s.",
+        user_id,
     )
 
 
@@ -470,8 +479,10 @@ async def help_button_handler(message: Message):
     await message.answer(
         "Я вмію працювати з інвойсами.\n\n"
         "Надішли інвойс як PDF, "
-        "і я спробую отримати з нього інформацію."
+        "і я спробую отримати з нього інформацію.\n"
+        "Але це не точно)"
     )
+
 
 # Користувач вводить нове значення
 # ============================================================
@@ -513,9 +524,10 @@ async def edit_value_handler(
         "editing_field"
     ] = None
 
-    print(
-        f"User {user_id} corrected "
-        f"{editing_field}: {new_value}"
+    logger.info(
+        "User %s corrected invoice field %s.",
+        user_id,
+        editing_field,
     )
 
     # --------------------------------------------------------
