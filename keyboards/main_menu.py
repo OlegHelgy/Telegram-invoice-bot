@@ -8,6 +8,10 @@ main_menu = ReplyKeyboardMarkup(
             KeyboardButton(text="🎲 Випадковий факт"),
         ],
         [
+            KeyboardButton(text="🤖 ChatGPT"),
+            KeyboardButton(text="🧠 Квіз"),
+        ],
+        [
             KeyboardButton(text="ℹ️ Допомога"),
         ],
     ],

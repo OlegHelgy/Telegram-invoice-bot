@@ -10,13 +10,24 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from invoice_parser import extract_pdf_text, parse_invoice
 from invoice_ai import analyze_invoice
 from invoice_reconciliation import reconcile_invoice
-from openai_client import ask_gpt_for_random_fact
+from openai_client import (
+    ask_gpt,
+    ask_gpt_for_random_fact,
+)
 
 from keyboards.main_menu import main_menu
 from keyboards.random_fact import (
     CB_RANDOM_END,
     CB_RANDOM_MORE,
     random_fact_keyboard,
+)
+from keyboards.quiz import (
+    CB_QUIZ_CHANGE,
+    CB_QUIZ_END,
+    CB_QUIZ_NEXT,
+    CB_QUIZ_TOPIC,
+    quiz_result_keyboard,
+    quiz_topics_keyboard,
 )
 
 
@@ -29,6 +40,12 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 user_invoices = {}
+
+# Історія діалогу з ChatGPT для звичайних текстових запитів.
+gpt_conversations = {}
+MAX_GPT_MESSAGES = 10
+
+quiz_sessions = {}
 
 
 # ============================================================
@@ -260,11 +277,334 @@ async def random_end_handler(callback: CallbackQuery):
 
 
 # ============================================================
+# ChatGPT інтерфейс
+# ============================================================
+
+CB_GPT_END = "gpt_end"
+
+
+def gpt_end_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="Закінчити розмову",
+        callback_data=CB_GPT_END,
+    )
+    return builder.as_markup()
+
+
+async def send_gpt_answer(message: Message, user_text: str):
+    user_id = message.from_user.id
+    history = gpt_conversations.setdefault(user_id, [])
+
+    if history:
+        conversation = "\n\n".join(
+            f"Користувач: {user_message}\n"
+            f"ChatGPT: {assistant_message}"
+            for user_message, assistant_message in history
+        )
+
+        prompt = (
+            "Продовжуй розмову з користувачем, враховуючи попередній "
+            "контекст.\n\n"
+            f"Попередня розмова:\n{conversation}\n\n"
+            f"Нове повідомлення користувача: {user_text}"
+        )
+    else:
+        prompt = user_text
+
+    try:
+        answer = ask_gpt(prompt)
+
+        history.append((user_text, answer))
+        if len(history) > MAX_GPT_MESSAGES:
+            del history[:-MAX_GPT_MESSAGES]
+
+        await message.answer(
+            answer,
+            reply_markup=gpt_end_keyboard(),
+        )
+
+    except Exception:
+        logger.exception(
+            "GPT request failed for user %s.",
+            user_id,
+        )
+
+        await message.answer(
+            "😔 Не вдалося отримати відповідь від ChatGPT. "
+            "Спробуй ще раз."
+        )
+
+
+
+@router.message(Command("gpt"))
+async def gpt_handler(message: Message):
+    logger.info(
+        "User %s requested GPT.",
+        message.from_user.id,
+    )
+
+    await message.answer_photo(
+        photo=FSInputFile(
+            "assets/img.png",
+        ),
+    )
+
+    user_text = message.text.removeprefix("/gpt").strip()
+
+    if not user_text:
+        await message.answer(
+            "Напиши запит після команди /gpt.\n\n"
+            "Наприклад:\n"
+            "/gpt Розкажи, що таке IBAN."
+        )
+        return
+
+    await send_gpt_answer(message, user_text)
+
+
+@router.callback_query(F.data == CB_GPT_END)
+async def gpt_end_handler(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    gpt_conversations.pop(user_id, None)
+
+    await callback.answer()
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Розмову завершено. Можеш написати нове питання.")
+
+
+@router.message(F.text == "🤖 ChatGPT")
+async def gpt_button_handler(message: Message):
+    user_id = message.from_user.id
+    gpt_conversations.pop(user_id, None)
+    gpt_conversations[user_id] = []
+
+    logger.info(
+        "User %s started a new GPT conversation.",
+        user_id,
+    )
+
+    await message.answer_photo(
+        photo=FSInputFile("assets/img.png"),
+    )
+
+    await message.answer(
+        "Напиши своє питання, і я передам його ChatGPT."
+    )
+
+
+# ============================================================
+# Квіз
+# ============================================================
+
+QUIZ_GENERATE_PROMPT = """
+Створи одне питання для вікторини на тему «{topic}».
+
+Вимоги до питання:
+- перевіряє лише ОДИН конкретний факт або поняття;
+- має одну чітку правильну відповідь;
+- не обʼєднує два або більше терміни в одному питанні;
+- не допускає кількох різних, але однаково правильних трактувань;
+- відповідь має бути короткою і зрозумілою;
+- користувач відповідатиме своїми словами, без варіантів відповіді;
+- не використовуй питання, де правильними можуть бути одночасно загальна
+  категорія і конкретний спосіб/метод.
+
+Перед формуванням питання перевір, що запропонована правильна відповідь
+однозначно відповідає саме цьому питанню.
+
+Поверни результат рівно у такому форматі:
+QUESTION: <одне чітке питання>
+ANSWER: <коротка правильна відповідь>
+
+Відповідай українською.
+"""
+
+
+QUIZ_CHECK_PROMPT = """
+Перевір відповідь користувача на питання вікторини.
+
+Питання: {question}
+Правильна відповідь: {correct_answer}
+Відповідь користувача: {user_answer}
+
+Оцінюй відповідь за змістом, а не за дослівним збігом.
+Вважай відповідь правильною, якщо вона передає той самий зміст,
+використовує коректний синонім, іншу граматичну форму або загальноприйняте
+скорочення.
+
+Не вважай відповідь правильною, якщо вона лише частково відповідає питанню,
+є занадто загальною замість конкретної правильної відповіді або змінює
+сутність поняття.
+
+Якщо питання саме по собі неоднозначне або правильна відповідь допускає
+кілька рівноцінних трактувань, не карай користувача за формулювання, яке
+логічно відповідає питанню.
+
+Перша строка відповіді ОБОВʼЯЗКОВО має бути рівно одним із двох значень:
+CORRECT
+або
+INCORRECT
+
+На наступних 1-2 рядках коротко поясни результат українською.
+Якщо відповідь правильна, коротко поясни, чому.
+Якщо неправильна, коротко назви правильну відповідь і поясни помилку.
+"""
+
+
+async def send_quiz_question(
+    message: Message,
+    user_id: int,
+):
+    session = quiz_sessions[user_id]
+    topic = session["topic"]
+
+    prompt = QUIZ_GENERATE_PROMPT.format(topic=topic)
+
+    try:
+        result = ask_gpt(prompt)
+        lines = [line.strip() for line in result.splitlines() if line.strip()]
+
+        question = next(
+            line.removeprefix("QUESTION:").strip()
+            for line in lines
+            if line.startswith("QUESTION:")
+        )
+        correct_answer = next(
+            line.removeprefix("ANSWER:").strip()
+            for line in lines
+            if line.startswith("ANSWER:")
+        )
+
+        session["question"] = question
+        session["correct_answer"] = correct_answer
+        session["question_number"] += 1
+
+        await message.answer(
+            f"🧠 Питання {session['question_number']}\n\n"
+            f"{question}\n\n"
+            "Напиши свою відповідь повідомленням."
+        )
+
+    except Exception:
+        logger.exception(
+            "Quiz question generation failed for user %s.",
+            user_id,
+        )
+        await message.answer(
+            "😔 Не вдалося підготувати питання. Спробуй ще раз."
+        )
+
+
+@router.message(Command("quiz"))
+async def quiz_handler(message: Message):
+    user_id = message.from_user.id
+    quiz_sessions.pop(user_id, None)
+
+    logger.info(
+        "User %s started a quiz.",
+        user_id,
+    )
+
+    await message.answer_photo(
+        photo=FSInputFile("assets/random_invoice_fact.png"),
+    )
+
+    await message.answer(
+        "🧠 Обери тему квізу:",
+        reply_markup=quiz_topics_keyboard(),
+    )
+
+
+@router.message(F.text == "🧠 Квіз")
+async def quiz_button_handler(message: Message):
+    await quiz_handler(message)
+
+
+@router.callback_query(F.data.startswith(f"{CB_QUIZ_TOPIC}:"))
+async def quiz_topic_handler(callback: CallbackQuery):
+    topic = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+
+    quiz_sessions[user_id] = {
+        "topic": topic,
+        "score": 0,
+        "question_number": 0,
+        "question": "",
+        "correct_answer": "",
+    }
+
+    await callback.answer()
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer(
+        f"Тема: {topic}\n\nПочинаємо!"
+    )
+    await send_quiz_question(
+        callback.message,
+        user_id,
+    )
+
+
+@router.callback_query(F.data == CB_QUIZ_NEXT)
+async def quiz_next_handler(callback: CallbackQuery):
+    user_id = callback.from_user.id
+
+    if user_id not in quiz_sessions:
+        await callback.answer("Квіз завершено.", show_alert=True)
+        return
+
+    await callback.answer()
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await send_quiz_question(
+        callback.message,
+        user_id,
+    )
+
+
+@router.callback_query(F.data == CB_QUIZ_CHANGE)
+async def quiz_change_handler(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    quiz_sessions.pop(user_id, None)
+
+    await callback.answer()
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer(
+        "🧠 Обери нову тему:",
+        reply_markup=quiz_topics_keyboard(),
+    )
+
+
+@router.callback_query(F.data == CB_QUIZ_END)
+async def quiz_end_handler(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    session = quiz_sessions.pop(user_id, None)
+
+    await callback.answer()
+    await callback.message.edit_reply_markup(reply_markup=None)
+
+    if session:
+        await callback.message.answer(
+            f"Квіз завершено. Твій результат: "
+            f"{session['score']} / {session['question_number']}.",
+            reply_markup=main_menu,
+        )
+    else:
+        await callback.message.answer(
+            "Квіз завершено.",
+            reply_markup=main_menu,
+        )
+
+
+# ============================================================
 # /start
 # ============================================================
 
 @router.message(CommandStart())
 async def start_handler(message: Message):
+    user_id = message.from_user.id
+    quiz_sessions.pop(user_id, None)
+    gpt_conversations.pop(user_id, None)
+
     await message.answer(
         "Привіт! Я бот для читання інвойсів.\n"
         "Обери дію:",
@@ -617,7 +957,70 @@ async def edit_value_handler(
 ):
     user_id = message.from_user.id
 
+    quiz_session = quiz_sessions.get(user_id)
+    if quiz_session and quiz_session.get("question"):
+        user_answer = message.text.strip()
+        if not user_answer:
+            return
+
+        prompt = QUIZ_CHECK_PROMPT.format(
+            question=quiz_session["question"],
+            correct_answer=quiz_session["correct_answer"],
+            user_answer=user_answer,
+        )
+
+        try:
+            result = ask_gpt(prompt)
+            is_correct = (
+                result.strip().splitlines()[0].strip()
+                == "CORRECT"
+            )
+
+            if is_correct:
+                quiz_session["score"] += 1
+                status = "✅ Правильно!"
+            else:
+                status = "❌ Неправильно."
+
+            explanation = "\n".join(
+                line.strip()
+                for line in result.splitlines()[1:]
+                if line.strip()
+            )
+
+            await message.answer(
+                f"{status}\n\n"
+                f"{explanation}\n\n"
+                f"Рахунок: {quiz_session['score']} / "
+                f"{quiz_session['question_number']}",
+                reply_markup=quiz_result_keyboard(),
+            )
+
+            quiz_session["question"] = ""
+            quiz_session["correct_answer"] = ""
+
+        except Exception:
+            logger.exception(
+                "Quiz answer check failed for user %s.",
+                user_id,
+            )
+            await message.answer(
+                "😔 Не вдалося перевірити відповідь. "
+                "Спробуй ще раз."
+            )
+
+        return
+
     if user_id not in user_invoices:
+        if user_id not in gpt_conversations:
+            await message.answer_photo(
+                photo=FSInputFile(
+                    "assets/img.png",
+                ),
+            )
+
+        await send_gpt_answer(message, message.text.strip())
+
         return
 
     editing_field = user_invoices[user_id].get(
@@ -625,6 +1028,15 @@ async def edit_value_handler(
     )
 
     if not editing_field:
+        if user_id not in gpt_conversations:
+            await message.answer_photo(
+                photo=FSInputFile(
+                    "assets/img.png",
+                ),
+            )
+
+        await send_gpt_answer(message, message.text.strip())
+
         return
 
     new_value = message.text.strip()

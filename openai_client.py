@@ -82,3 +82,11 @@ def ask_gpt_for_random_fact(
     )
 
     return response.output_text
+
+def ask_gpt(prompt: str) -> str:
+    response = client.responses.create(
+        model="gpt-5-nano",
+        input=prompt,
+    )
+
+    return response.output_text
