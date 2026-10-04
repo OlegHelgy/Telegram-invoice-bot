@@ -47,3 +47,38 @@ def ask_gpt_with_invoice(
     )
 
     return response.output_text
+
+
+def ask_gpt_for_random_fact(
+    prompt: str,
+    image_path: str,
+) -> str:
+
+    with open(image_path, "rb") as file:
+        image_base64 = base64.b64encode(
+            file.read()
+        ).decode("utf-8")
+
+    response = client.responses.create(
+        model="gpt-5-nano",
+        input=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": prompt,
+                    },
+                    {
+                        "type": "input_image",
+                        "image_url": (
+                            "data:image/png;base64,"
+                            f"{image_base64}"
+                        ),
+                    },
+                ],
+            }
+        ],
+    )
+
+    return response.output_text

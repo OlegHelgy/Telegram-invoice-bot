@@ -1,16 +1,23 @@
 import logging
 import os
+import random
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, FSInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from invoice_parser import extract_pdf_text, parse_invoice
 from invoice_ai import analyze_invoice
 from invoice_reconciliation import reconcile_invoice
+from openai_client import ask_gpt_for_random_fact
 
 from keyboards.main_menu import main_menu
+from keyboards.random_fact import (
+    CB_RANDOM_END,
+    CB_RANDOM_MORE,
+    random_fact_keyboard,
+)
 
 
 router = Router()
@@ -53,6 +60,43 @@ FIELD_NAMES = {
     "bank": "Банк",
     "bank_address": "Адреса банку",
 }
+
+
+# ============================================================
+# Теми для випадкового факту
+# ============================================================
+
+PAYMENT_TOPICS = [
+    "історія платежів",
+    "банківські перекази",
+    "карткові платежі",
+    "безконтактні платежі",
+    "онлайн-платежі",
+    "платіжні системи",
+    "IBAN",
+    "SWIFT",
+    "валюти",
+    "фінансові технології",
+]
+
+
+RANDOM_FACT_PROMPT = """
+Ти — експерт з цікавих фактів про платежі, банки та фінансові технології.
+Розкажи один маловідомий, але достовірний факт на тему «{topic}».
+
+Вимоги до факту:
+- дивовижний для пересічної людини;
+- легко запамʼятовується;
+- викладений у 2-3 простих реченнях;
+- зрозумілий без спеціальних знань;
+- стосується платежів, банків, грошей або платіжних технологій.
+
+Не повторюй загальновідомі факти. Не вигадуй статистику,
+історичні події, назви компаній або технологій.
+
+Відповідай українською. Не додавай вступів на кшталт
+«Ось цікавий факт:» — одразу сам факт.
+"""
 
 
 # ============================================================
@@ -133,6 +177,86 @@ def edit_fields_keyboard():
     builder.adjust(2)
 
     return builder.as_markup()
+
+
+# ============================================================
+# Випадковий факт про платежі
+# ============================================================
+
+async def send_random_fact(message: Message):
+    topic = random.choice(PAYMENT_TOPICS)
+
+    prompt = RANDOM_FACT_PROMPT.format(
+        topic=topic
+    )
+
+    try:
+        fact = ask_gpt_for_random_fact(
+            prompt=prompt,
+            image_path="assets/random_invoice_fact.png",
+        )
+
+        await message.answer(
+            fact,
+            reply_markup=random_fact_keyboard(),
+        )
+
+    except Exception:
+        logger.exception(
+            "Random fact generation failed for user %s.",
+            message.from_user.id,
+        )
+
+        await message.answer(
+            "😔 Не вдалося звʼязатися з ChatGPT. "
+            "Спробуй ще раз за хвилину.",
+            reply_markup=random_fact_keyboard(),
+        )
+
+
+@router.message(Command("random"))
+async def random_fact_handler(message: Message):
+    logger.info(
+        "User %s requested a random payment fact.",
+        message.from_user.id,
+    )
+
+    await message.answer_photo(
+        photo=FSInputFile(
+            "assets/random_invoice_fact.png"
+        )
+    )
+
+    await send_random_fact(message)
+
+
+@router.message(F.text == "🎲 Випадковий факт")
+async def random_fact_button_handler(message: Message):
+    await random_fact_handler(message)
+
+
+@router.callback_query(F.data == CB_RANDOM_MORE)
+async def random_more_handler(callback: CallbackQuery):
+    await callback.answer()
+
+    await callback.message.edit_reply_markup(
+        reply_markup=None,
+    )
+
+    await send_random_fact(callback.message)
+
+
+@router.callback_query(F.data == CB_RANDOM_END)
+async def random_end_handler(callback: CallbackQuery):
+    await callback.answer()
+
+    await callback.message.edit_reply_markup(
+        reply_markup=None,
+    )
+
+    await callback.message.answer(
+        "Гаразд."
+    )
 
 
 # ============================================================
