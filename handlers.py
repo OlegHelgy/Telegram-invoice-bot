@@ -619,9 +619,12 @@ async def start_handler(message: Message):
 @router.message(Command("help"))
 async def help_handler(message: Message):
     await message.answer(
-        "Привіт! Я бот для читання інвойсів.\n"
-        "Обери дію:",
-        reply_markup=main_menu,
+        "Доступні команди:\n\n"
+        "/start — головне меню\n"
+        "/help — допомога\n"
+        "/random — випадковий факт\n"
+        "/gpt — ChatGPT\n"
+        "/quiz — квіз"
     )
 
 
@@ -941,10 +944,12 @@ async def edit_field_handler(
 @router.message(F.text == "ℹ️ Допомога")
 async def help_button_handler(message: Message):
     await message.answer(
-        "Я вмію працювати з інвойсами.\n\n"
-        "Надішли інвойс як PDF, "
-        "і я спробую отримати з нього інформацію.\n"
-        "Але це не точно)"
+        "Доступні команди:\n\n"
+        "/start — головне меню\n"
+        "/help — допомога\n"
+        "/random — випадковий факт\n"
+        "/gpt — ChatGPT\n"
+        "/quiz — квіз"
     )
 
 
